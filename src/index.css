@@ -1,0 +1,48 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Surfaces */
+  --color-page: #e9f1fb;
+  --color-surface: #ffffff;
+  --color-ink: #1d2433;
+  --color-muted: #8a93a6;
+  --color-line: #eef1f6;
+
+  /* Status palette (from reference) */
+  --color-grass: #79c143;
+  --color-grass-soft: #eef7e6;
+  --color-sun: #f6c531;
+  --color-sun-soft: #fdf4dc;
+  --color-coral: #f47b56;
+  --color-coral-soft: #fdece7;
+
+  --radius-card: 28px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-page);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Placeholder slot for the icons you'll drop in later */
+.icon-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}

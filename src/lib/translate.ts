@@ -1,0 +1,225 @@
+import type { Definition, Translation } from '../types'
+
+const MAX_TRANSLATIONS = 6
+const MAX_DEFINITIONS = 4
+const MAX_EXAMPLES = 3
+
+/**
+ * Resolves an English word into a Russian translation + IPA transcription +
+ * pronunciation audio + dictionary definitions and example sentences, using two
+ * free, key-less public APIs:
+ *
+ *  - MyMemory          → EN → RU translation
+ *  - Free Dictionary   → IPA phonetics + audio file + definitions + examples
+ *
+ * Both calls run in parallel; either is allowed to fail without breaking the
+ * other (a word may have a translation but no known phonetics, and vice versa).
+ */
+export async function translateWord(rawWord: string): Promise<Translation> {
+  const word = rawWord.trim().toLowerCase()
+  if (!word) throw new Error('Enter a word first')
+
+  const [translations, dict] = await Promise.all([
+    fetchTranslations(word),
+    fetchDictionary(word),
+  ])
+
+  return {
+    russian: translations[0],
+    translations,
+    transcription: dict.transcription,
+    audioUrl: dict.audioUrl,
+    definitions: dict.definitions,
+    examples: dict.examples,
+    found: dict.found,
+  }
+}
+
+/**
+ * Returns several accepted Russian translations (primary first). A single word
+ * like "looser" legitimately means «свободный», «рыхлый», «неплотный»… so we
+ * gather alternatives — otherwise practice would reject valid answers.
+ *
+ * Primary source is Google's public translate endpoint, whose `dt=bd` payload
+ * carries a part-of-speech dictionary of alternatives. MyMemory is the fallback
+ * if that ever fails, yielding at least the single best translation.
+ */
+async function fetchTranslations(word: string): Promise<string[]> {
+  const fromGoogle = await fetchGoogleTranslations(word)
+  if (fromGoogle.length > 0) return fromGoogle
+
+  const fallback = await fetchMyMemory(word)
+  return [fallback]
+}
+
+async function fetchGoogleTranslations(word: string): Promise<string[]> {
+  try {
+    const url =
+      `https://translate.googleapis.com/translate_a/single?client=gtx` +
+      `&sl=en&tl=ru&dt=t&dt=bd&q=${encodeURIComponent(word)}`
+    const res = await fetch(url)
+    if (!res.ok) return []
+
+    // Shape: [ [[main,...],...], [ [pos, [..], [[term,...],...]], ... ], ... ]
+    const data = (await res.json()) as [
+      Array<[string, ...unknown[]]> | null,
+      Array<[string, unknown, Array<[string, ...unknown[]]>]> | null,
+      ...unknown[],
+    ]
+
+    const main = (data[0] ?? [])
+      .map((seg) => seg?.[0] ?? '')
+      .join('')
+      .trim()
+
+    const alternatives: string[] = []
+    for (const group of data[1] ?? []) {
+      for (const term of group?.[2] ?? []) {
+        if (typeof term?.[0] === 'string') alternatives.push(term[0])
+      }
+    }
+
+    return dedupe([main, ...alternatives].filter(Boolean), (t) => t).slice(
+      0,
+      MAX_TRANSLATIONS,
+    )
+  } catch {
+    return []
+  }
+}
+
+async function fetchMyMemory(word: string): Promise<string> {
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
+    word,
+  )}&langpair=en|ru`
+
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Translation service is unavailable')
+
+  const data = (await res.json()) as {
+    responseData?: { translatedText?: string }
+  }
+  const translated = data.responseData?.translatedText?.trim()
+  if (!translated) throw new Error(`No translation found for "${word}"`)
+
+  return translated
+}
+
+type DictionaryResult = {
+  transcription: string
+  audioUrl: string | null
+  definitions: Definition[]
+  examples: string[]
+  /** True if the word has a dictionary entry (false only on a definite 404). */
+  found: boolean
+}
+
+const EMPTY_DICTIONARY: Omit<DictionaryResult, 'found'> = {
+  transcription: '',
+  audioUrl: null,
+  definitions: [],
+  examples: [],
+}
+
+async function fetchDictionary(word: string): Promise<DictionaryResult> {
+  try {
+    const res = await fetch(
+      `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(
+        word,
+      )}`,
+    )
+    // A 404 means the word genuinely isn't in the dictionary. Any other
+    // failure means we couldn't verify — don't block the user in that case.
+    if (!res.ok) {
+      return { ...EMPTY_DICTIONARY, found: res.status !== 404 }
+    }
+
+    const entries = (await res.json()) as Array<{
+      phonetic?: string
+      phonetics?: Array<{ text?: string; audio?: string }>
+      meanings?: Array<{
+        partOfSpeech?: string
+        definitions?: Array<{ definition?: string; example?: string }>
+      }>
+    }>
+
+    const phonetics = entries.flatMap((e) => e.phonetics ?? [])
+    const transcription =
+      entries.find((e) => e.phonetic)?.phonetic ??
+      phonetics.find((p) => p.text)?.text ??
+      ''
+    const audioUrl =
+      phonetics.find((p) => p.audio && p.audio.length > 0)?.audio ?? null
+
+    // Flatten every definition (and its example) across all parts of speech,
+    // then de-duplicate and keep a useful handful of each.
+    const definitions: Definition[] = []
+    const examples: string[] = []
+    for (const entry of entries) {
+      for (const meaning of entry.meanings ?? []) {
+        const partOfSpeech = meaning.partOfSpeech ?? ''
+        for (const def of meaning.definitions ?? []) {
+          if (def.definition) {
+            definitions.push({ partOfSpeech, text: def.definition })
+          }
+          if (def.example) examples.push(def.example)
+        }
+      }
+    }
+
+    return {
+      transcription,
+      audioUrl,
+      definitions: dedupe(definitions, (d) => d.text).slice(0, MAX_DEFINITIONS),
+      examples: dedupe(examples, (e) => e).slice(0, MAX_EXAMPLES),
+      found: true,
+    }
+  } catch {
+    // Network error — best-effort, and we can't verify existence, so allow it.
+    return { ...EMPTY_DICTIONARY, found: true }
+  }
+}
+
+function dedupe<T>(items: T[], key: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const k = key(item).trim().toLowerCase()
+    if (!k || seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
+/**
+ * Masks the headword (and simple inflections) inside an example sentence so
+ * showing examples during practice doesn't hand the learner the answer.
+ */
+export function maskWord(sentence: string, word: string): string {
+  const escaped = word.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (!escaped) return sentence
+  return sentence.replace(
+    new RegExp(`\\b${escaped}(s|es|ed|ing|d)?\\b`, 'gi'),
+    '___',
+  )
+}
+
+/**
+ * Plays a word out loud. Prefers a real recording when the dictionary gave us
+ * one, otherwise falls back to the browser's built-in speech synthesis.
+ */
+export function speak(text: string, audioUrl: string | null) {
+  if (audioUrl) {
+    const audio = new Audio(audioUrl.startsWith('//') ? `https:${audioUrl}` : audioUrl)
+    audio.play().catch(() => speakSynthesized(text))
+    return
+  }
+  speakSynthesized(text)
+}
+
+function speakSynthesized(text: string) {
+  if (!('speechSynthesis' in window)) return
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.lang = 'en-US'
+  window.speechSynthesis.cancel()
+  window.speechSynthesis.speak(utterance)
+}
