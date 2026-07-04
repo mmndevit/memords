@@ -39,10 +39,10 @@ export function Layout() {
             })}
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* <div className="flex items-center gap-3">
             <IconSlot label="bell" size={22} />
             <IconSlot label="avatar" size={36} className="rounded-full" />
-          </div>
+          </div> */}
         </nav>
       </header>
 
