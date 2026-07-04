@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
 import { useVocabulary } from '../lib/storage'
 import { AddWordForm } from '../components/AddWordForm'
 import { WordCard } from '../components/WordCard'
