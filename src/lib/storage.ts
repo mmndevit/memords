@@ -1,55 +1,146 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Word } from '../types'
-
-const STORAGE_KEY = 'memords.vocabulary'
+import { useCallback } from 'react'
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import type { Definition, Word } from '../types'
+import { WORDS_TABLE, isSupabaseConfigured, supabase } from './supabase'
 
 /**
- * The single source of truth for the user's vocabulary. Today it's backed by
- * localStorage — swapping in a real database later means changing only the
- * `load` / `persist` helpers below; the hook's API stays the same.
+ * The single source of truth for the user's vocabulary, backed by a Supabase
+ * (Postgres) table. Reads go through TanStack Query so the list stays cached
+ * and in sync; writes optimistically update that cache and then reconcile with
+ * the server. The hook's public shape — `words`, `addWord`, `removeWord` — is
+ * unchanged from the old localStorage version, so callers don't care where the
+ * data actually lives.
  */
-function load(): Word[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    // Backfill fields added in later versions so older saves don't crash.
-    return (JSON.parse(raw) as Word[]).map((w) => ({
-      ...w,
-      definitions: w.definitions ?? [],
-      examples: w.examples ?? [],
-      translations:
-        w.translations && w.translations.length > 0
-          ? w.translations
-          : [w.russian],
-    }))
-  } catch {
-    return []
+const QUERY_KEY = ['vocabulary'] as const
+
+/** Shape of a row in the `words` table (snake_case, as Postgres returns it). */
+interface WordRow {
+  id: string
+  english: string
+  russian: string
+  translations: string[]
+  transcription: string
+  audio_url: string | null
+  definitions: Definition[]
+  examples: string[]
+  created_at: string
+}
+
+/** Map a database row into the camelCase `Word` the UI works with. */
+function rowToWord(row: WordRow): Word {
+  return {
+    id: row.id,
+    english: row.english,
+    russian: row.russian,
+    translations:
+      row.translations && row.translations.length > 0
+        ? row.translations
+        : [row.russian],
+    transcription: row.transcription ?? '',
+    audioUrl: row.audio_url,
+    definitions: row.definitions ?? [],
+    examples: row.examples ?? [],
+    createdAt: new Date(row.created_at).getTime(),
   }
 }
 
-function persist(words: Word[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(words))
+/** Map a new word (no id/createdAt yet) into a row for insertion. */
+function wordToInsert(word: Omit<Word, 'id' | 'createdAt'>) {
+  return {
+    english: word.english,
+    russian: word.russian,
+    translations: word.translations,
+    transcription: word.transcription,
+    audio_url: word.audioUrl,
+    definitions: word.definitions,
+    examples: word.examples,
+  }
+}
+
+async function fetchWords(): Promise<Word[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from(WORDS_TABLE)
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data as WordRow[]).map(rowToWord)
 }
 
 export function useVocabulary() {
-  const [words, setWords] = useState<Word[]>(load)
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    persist(words)
-  }, [words])
+  const { data, isLoading, error } = useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: fetchWords,
+    // Nothing to fetch until credentials are present.
+    enabled: isSupabaseConfigured,
+  })
 
-  const addWord = useCallback((word: Omit<Word, 'id' | 'createdAt'>) => {
-    setWords((prev) => [
-      { ...word, id: crypto.randomUUID(), createdAt: Date.now() },
-      ...prev,
-    ])
-  }, [])
+  const addMutation = useMutation({
+    mutationFn: async (word: Omit<Word, 'id' | 'createdAt'>) => {
+      if (!supabase) throw new Error('Supabase is not configured')
+      const { data, error } = await supabase
+        .from(WORDS_TABLE)
+        .insert(wordToInsert(word))
+        .select()
+        .single()
+      if (error) throw error
+      return rowToWord(data as WordRow)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY })
+    },
+  })
 
-  const removeWord = useCallback((id: string) => {
-    setWords((prev) => prev.filter((w) => w.id !== id))
-  }, [])
+  const removeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      if (!supabase) throw new Error('Supabase is not configured')
+      const { error } = await supabase.from(WORDS_TABLE).delete().eq('id', id)
+      if (error) throw error
+      return id
+    },
+    // Optimistically drop the card so removal feels instant.
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: QUERY_KEY })
+      const previous = queryClient.getQueryData<Word[]>(QUERY_KEY)
+      queryClient.setQueryData<Word[]>(QUERY_KEY, (old) =>
+        (old ?? []).filter((w) => w.id !== id),
+      )
+      return { previous }
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(QUERY_KEY, context.previous)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY })
+    },
+  })
 
-  return { words, addWord, removeWord }
+  const addWord = useCallback(
+    (word: Omit<Word, 'id' | 'createdAt'>) => addMutation.mutate(word),
+    [addMutation],
+  )
+
+  const removeWord = useCallback(
+    (id: string) => removeMutation.mutate(id),
+    [removeMutation],
+  )
+
+  return {
+    words: data ?? [],
+    addWord,
+    removeWord,
+    loading: isLoading,
+    error: error as Error | null,
+    configured: isSupabaseConfigured,
+  }
 }
 
 /**
