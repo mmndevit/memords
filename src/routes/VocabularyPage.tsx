@@ -23,7 +23,7 @@ export function VocabularyPage() {
           </p>
         </div>
 
-        <Link
+        {/* <Link
           to="/practice"
           className={`flex items-center gap-2 rounded-full px-6 py-3 text-base font-extrabold text-white transition ${
             words.length === 0
@@ -33,7 +33,7 @@ export function VocabularyPage() {
         >
           <IconSlot label="cards" size={20} />
           Practice
-        </Link>
+        </Link> */}
       </header>
 
       <AddWordForm onAdd={addWord} existing={words.map((w) => w.english)} />
