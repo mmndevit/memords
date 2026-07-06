@@ -9,6 +9,9 @@ import type { Word } from '../types'
 
 type Round = 1 | 2
 
+// A practice session uses at most this many randomly picked words.
+const QUIZ_SIZE = 10
+
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items]
   for (let i = copy.length - 1; i > 0; i--) {
@@ -18,10 +21,15 @@ function shuffle<T>(items: T[]): T[] {
   return copy
 }
 
+// Shuffle the full vocabulary and take up to QUIZ_SIZE random words for a session.
+function drawDeck(words: Word[]): Word[] {
+  return shuffle(words).slice(0, QUIZ_SIZE)
+}
+
 export function PracticePage() {
   const { words } = useVocabulary()
   // Snapshot the deck once so adding/removing elsewhere can't reshuffle mid-game.
-  const initialDeck = useMemo(() => shuffle(words), [words])
+  const initialDeck = useMemo(() => drawDeck(words), [words])
 
   const [deck, setDeck] = useState<Word[]>(initialDeck)
   const [round, setRound] = useState<Round>(1)
@@ -43,7 +51,7 @@ export function PracticePage() {
         total={deck.length}
         scores={scores}
         onRestart={() => {
-          setDeck(shuffle(words))
+          setDeck(drawDeck(words))
           setRound(1)
           setIndex(0)
           setValue('')
