@@ -216,10 +216,62 @@ export function speak(text: string, audioUrl: string | null) {
   speakSynthesized(text)
 }
 
+// Kick off voice loading as soon as this module is imported. Voices populate
+// asynchronously, so requesting them early gives the browser a head start
+// before the user ever presses play.
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  window.speechSynthesis.getVoices()
+}
+
+/** Picks the best-sounding English voice available, or null if none exist. */
+function pickEnglishVoice(
+  voices: SpeechSynthesisVoice[],
+): SpeechSynthesisVoice | null {
+  if (voices.length === 0) return null
+  const english = voices.filter((v) => v.lang.toLowerCase().startsWith('en'))
+  const pool = english.length > 0 ? english : voices
+  return (
+    // Prefer higher-quality named voices (Google/natural/enhanced) in en-US…
+    pool.find(
+      (v) =>
+        v.lang.toLowerCase() === 'en-us' &&
+        /google|natural|enhanced|samantha/i.test(v.name),
+    ) ??
+    // …then any en-US voice, the browser default, or whatever's first.
+    pool.find((v) => v.lang.toLowerCase() === 'en-us') ??
+    pool.find((v) => v.default) ??
+    pool[0]
+  )
+}
+
 function speakSynthesized(text: string) {
   if (!('speechSynthesis' in window)) return
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = 'en-US'
-  window.speechSynthesis.cancel()
-  window.speechSynthesis.speak(utterance)
+  const synth = window.speechSynthesis
+
+  const speakNow = () => {
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'en-US'
+    const voice = pickEnglishVoice(synth.getVoices())
+    if (voice) utterance.voice = voice
+    synth.cancel()
+    synth.speak(utterance)
+  }
+
+  // On a fresh page load getVoices() is often still empty; speaking then makes
+  // the browser fall back to a robotic default voice. Wait for the voice list
+  // to arrive the first time so we can pick a real English voice instead.
+  if (synth.getVoices().length > 0) {
+    speakNow()
+    return
+  }
+
+  let spoken = false
+  const run = () => {
+    if (spoken) return
+    spoken = true
+    speakNow()
+  }
+  synth.addEventListener('voiceschanged', run, { once: true })
+  // Fallback in case the event never fires (some browsers don't emit it).
+  setTimeout(run, 500)
 }
