@@ -203,14 +203,45 @@ export function maskWord(sentence: string, word: string): string {
   )
 }
 
+// Tracks the recording currently playing so a new word (or a double-tap on the
+// same one) can stop it before starting. Without this, overlapping playback
+// stacks the same voice on top of itself and you hear an echo.
+let currentAudio: HTMLAudioElement | null = null
+
+// Bumped on every stopPlayback() so a deferred synthesized call (one that was
+// waiting for voices to load) knows it's stale and skips speaking an old word.
+let speechGeneration = 0
+
+/** Stops any recording and any synthesized speech that's still playing. */
+function stopPlayback() {
+  speechGeneration++
+  if (currentAudio) {
+    currentAudio.pause()
+    currentAudio.currentTime = 0
+    currentAudio = null
+  }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel()
+  }
+}
+
 /**
  * Plays a word out loud. Prefers a real recording when the dictionary gave us
  * one, otherwise falls back to the browser's built-in speech synthesis.
  */
 export function speak(text: string, audioUrl: string | null) {
+  // Always silence whatever is playing first, so recordings and synthesized
+  // speech never overlap into an echo or a doubled robotic voice.
+  stopPlayback()
+
   if (audioUrl) {
     const audio = new Audio(audioUrl.startsWith('//') ? `https:${audioUrl}` : audioUrl)
-    audio.play().catch(() => speakSynthesized(text))
+    currentAudio = audio
+    audio.play().catch(() => {
+      // Only fall back to synthesis if this recording is still the active one;
+      // if a newer word already replaced it, staying silent avoids an echo.
+      if (currentAudio === audio) speakSynthesized(text)
+    })
     return
   }
   speakSynthesized(text)
@@ -265,9 +296,12 @@ function speakSynthesized(text: string) {
     return
   }
 
+  // Remember which playback this deferred call belongs to; if stopPlayback()
+  // runs before the voices arrive, this word is stale and should stay silent.
+  const generation = speechGeneration
   let spoken = false
   const run = () => {
-    if (spoken) return
+    if (spoken || generation !== speechGeneration) return
     spoken = true
     speakNow()
   }
