@@ -136,7 +136,7 @@ export function PracticePage() {
         onSubmit={check}
         onNext={next}
         onListen={
-          round === 1 ? () => speak(card.english, card.audioUrl) : undefined
+          round === 1 ? () => speak(card.english) : undefined
         }
         details={
           <WordDetails

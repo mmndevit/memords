@@ -226,20 +226,34 @@ function stopPlayback() {
 }
 
 /**
- * Plays a word out loud. Prefers a real recording when the dictionary gave us
- * one, otherwise falls back to the browser's built-in speech synthesis.
+ * Builds the URL of our text-to-speech proxy for a word, or null when Supabase
+ * isn't configured. The proxy returns one fixed, natural voice for every word
+ * and every user (see supabase/functions/tts), so pronunciation is consistent
+ * instead of varying by dictionary recording or by the device's own voice.
  */
-export function speak(text: string, audioUrl: string | null) {
-  // Always silence whatever is playing first, so recordings and synthesized
-  // speech never overlap into an echo or a doubled robotic voice.
+function ttsUrl(text: string): string | null {
+  const base = import.meta.env.VITE_SUPABASE_URL as string | undefined
+  if (!base) return null
+  return `${base}/functions/v1/tts?text=${encodeURIComponent(text)}`
+}
+
+/**
+ * Plays a word out loud in the app's one clear voice. Uses the TTS proxy so the
+ * same neural voice is heard everywhere; only if that request fails (e.g. the
+ * user is offline) do we fall back to the browser's built-in speech synthesis
+ * so the button is never completely silent.
+ */
+export function speak(text: string) {
+  // Always silence whatever is playing first, so nothing overlaps into an echo.
   stopPlayback()
 
-  if (audioUrl) {
-    const audio = new Audio(audioUrl.startsWith('//') ? `https:${audioUrl}` : audioUrl)
+  const url = ttsUrl(text)
+  if (url) {
+    const audio = new Audio(url)
     currentAudio = audio
     audio.play().catch(() => {
-      // Only fall back to synthesis if this recording is still the active one;
-      // if a newer word already replaced it, staying silent avoids an echo.
+      // Only fall back if this word is still the active one; if a newer word
+      // already replaced it, staying silent avoids an echo.
       if (currentAudio === audio) speakSynthesized(text)
     })
     return

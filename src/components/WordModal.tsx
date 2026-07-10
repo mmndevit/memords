@@ -53,7 +53,7 @@ export function WordModal({ word, onClose }: WordModalProps) {
             )}
             <button
               type="button"
-              onClick={() => speak(word.english, word.audioUrl)}
+              onClick={() => speak(word.english)}
               title="Listen"
               className="flex h-9 w-9 items-center justify-center rounded-full bg-page/70 transition hover:bg-page"
             >

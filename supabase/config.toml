@@ -1,0 +1,4 @@
+# The `tts` function is a public text-to-speech proxy loaded directly by an
+# <audio> element, so it must be reachable without an Authorization header.
+[functions.tts]
+verify_jwt = false

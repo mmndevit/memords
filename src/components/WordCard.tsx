@@ -43,7 +43,7 @@ export function WordCard({ word, onRemove, onOpen }: WordCardProps) {
           type="button"
           onClick={(e) => {
             e.stopPropagation()
-            speak(word.english, word.audioUrl)
+            speak(word.english)
           }}
           title="Listen"
           className="flex h-8 w-8 items-center justify-center rounded-full bg-page/70 transition hover:bg-page"

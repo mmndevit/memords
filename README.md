@@ -73,3 +73,26 @@ export default defineConfig([
 ])
 
 ```
+
+## Pronunciation (one clear voice)
+
+Every word is spoken in a single, consistent voice via a Supabase Edge Function
+(`supabase/functions/tts`) that proxies Google's **free** Translate TTS endpoint
+and caches each result in Storage, so each word is fetched only once. No API key
+and no billing account are required.
+
+One-time setup:
+
+1. **Create a public Storage bucket** named `tts` in your Supabase project.
+2. **Deploy the function:**
+   ```sh
+   supabase functions deploy tts
+   ```
+3. *(optional)* pick a different language voice — defaults to `en`:
+   ```sh
+   supabase secrets set TTS_LANG=en
+   ```
+
+The browser reaches it at `${VITE_SUPABASE_URL}/functions/v1/tts?text=<word>`.
+Because the endpoint is free and unofficial, keep to short single words/phrases;
+the Storage cache keeps request volume low so you stay well under its limits.
