@@ -6,6 +6,8 @@ export type CardStatus = 'typing' | 'correct' | 'wrong'
 type FlashcardProps = {
   prompt: string
   promptHint: string
+  /** Further wordings of the prompt, listed under it in a smaller type. */
+  promptAlternates?: string[]
   transcription?: string
   /** Shown only when answered wrong, so the user learns the right answer. */
   correctAnswer: string
@@ -29,6 +31,7 @@ const SURFACE: Record<CardStatus, string> = {
 export function Flashcard({
   prompt,
   promptHint,
+  promptAlternates,
   transcription,
   correctAnswer,
   placeholder,
@@ -68,6 +71,11 @@ export function Flashcard({
         <h2 className="text-5xl font-extrabold capitalize tracking-tight">
           {prompt}
         </h2>
+        {promptAlternates && promptAlternates.length > 0 && (
+          <p className="max-w-sm text-lg font-bold text-muted">
+            {promptAlternates.join(', ')}
+          </p>
+        )}
         {transcription && (
           <span className="font-mono text-lg text-muted">{transcription}</span>
         )}

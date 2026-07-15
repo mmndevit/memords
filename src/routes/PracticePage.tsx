@@ -12,6 +12,18 @@ type Round = 1 | 2
 // A practice session uses at most this many randomly picked words.
 const QUIZ_SIZE = 10
 
+// How many extra Russian wordings to list under the RU → EN prompt, so a word
+// with an ambiguous primary translation still points at one English answer.
+const MAX_PROMPT_ALTERNATES = 3
+
+/** The stored translations other than `russian`, compared loosely. */
+function alternateTranslations(word: Word): string[] {
+  const primary = word.russian.trim().toLowerCase()
+  return word.translations
+    .filter((t) => t.trim().toLowerCase() !== primary)
+    .slice(0, MAX_PROMPT_ALTERNATES)
+}
+
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items]
   for (let i = copy.length - 1; i > 0; i--) {
@@ -127,6 +139,7 @@ export function PracticePage() {
         key={`${round}-${index}`}
         prompt={round === 1 ? card.english : card.russian}
         promptHint={round === 1 ? 'Translate to Russian' : 'Translate to English'}
+        promptAlternates={round === 2 ? alternateTranslations(card) : undefined}
         transcription={round === 1 ? card.transcription || undefined : undefined}
         correctAnswer={expectedLabel}
         placeholder={round === 1 ? 'Type in Russian…' : 'Type in English…'}
